@@ -163,9 +163,9 @@ fun loadModules(): List<Module> {
         .orEmpty()
 }
 
-// With RootOptions
+// With RootOptions (if you use RootOptions, always place it first)
 @RootFunction
-fun readFile(path: String, options: RootOptions): String {
+fun readFile(options: RootOptions, path: String): String {
     return File(path).readText()
 }
 
