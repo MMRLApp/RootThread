@@ -1,0 +1,1 @@
+-keep class * implements dev.mmrlx.thread.RootCallable { *; }
