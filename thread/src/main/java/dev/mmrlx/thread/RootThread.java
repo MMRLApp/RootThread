@@ -26,6 +26,8 @@ import com.topjohnwu.superuser.ipc.RootService;
 import org.objenesis.strategy.StdInstantiatorStrategy;
 
 import java.io.IOException;
+import java.io.Serial;
+import java.io.Serializable;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -159,7 +161,24 @@ public final class RootThread {
      */
     @NonNull
     public static <T> Future<T> submit(@NonNull RootCallable<T> callable) {
-        return sExecutor.submit(() -> executeSync(callable));
+        return submit(callable, RootArgs.EMPTY);
+    }
+
+    /**
+     * Submits {@code callable} together with {@code args} to the root process and returns a
+     * {@link Future} that resolves with the callable's return value.
+     *
+     * <p>The supplied {@code args} are serialized alongside the callable and are available
+     * inside the root process via {@link RootOptions#getArgs()}.
+     *
+     * @param callable The closure to execute in the root process.
+     * @param args     Custom arguments to pass to the callable; must be Kryo-serializable.
+     * @param <T>      Return type of the callable.
+     * @return A {@link Future} representing the pending result.
+     */
+    @NonNull
+    public static <T> Future<T> submit(@NonNull RootCallable<T> callable, @NonNull RootArgs args) {
+        return sExecutor.submit(() -> executeSync(callable, args));
     }
 
     /**
@@ -175,8 +194,26 @@ public final class RootThread {
     @Nullable
     public static <T> T executeBlocking(@NonNull RootCallable<T> callable)
             throws IOException, InterruptedException {
+        return executeBlocking(callable, RootArgs.EMPTY);
+    }
+
+    /**
+     * Submits {@code callable} together with {@code args} to the root process and blocks the
+     * calling thread until the result is available.  Must NOT be called on the main thread.
+     *
+     * @param callable The closure to execute in the root process.
+     * @param args     Custom arguments available in the root process via
+     *                 {@link RootOptions#getArgs()}.
+     * @param <T>      Return type of the callable.
+     * @return The value returned by the callable.
+     * @throws IOException          If IPC serialisation, transport, or the remote call fails.
+     * @throws InterruptedException If the calling thread is interrupted while waiting.
+     */
+    @Nullable
+    public static <T> T executeBlocking(@NonNull RootCallable<T> callable, @NonNull RootArgs args)
+            throws IOException, InterruptedException {
         try {
-            return submit(callable).get();
+            return submit(callable, args).get();
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof IOException) throw (IOException) cause;
@@ -203,8 +240,33 @@ public final class RootThread {
             long timeout,
             @NonNull TimeUnit unit
     ) throws IOException, InterruptedException, TimeoutException {
+        return executeBlocking(callable, RootArgs.EMPTY, timeout, unit);
+    }
+
+    /**
+     * Submits {@code callable} together with {@code args} to the root process and blocks the
+     * calling thread for at most {@code timeout} {@code unit}s.
+     *
+     * @param callable The closure to execute in the root process.
+     * @param args     Custom arguments available in the root process via
+     *                 {@link RootOptions#getArgs()}.
+     * @param timeout  Maximum time to wait.
+     * @param unit     Time unit for {@code timeout}.
+     * @param <T>      Return type of the callable.
+     * @return The value returned by the callable.
+     * @throws IOException          If IPC serialisation, transport, or the remote call fails.
+     * @throws InterruptedException If the calling thread is interrupted while waiting.
+     * @throws TimeoutException     If the operation does not complete within the timeout.
+     */
+    @Nullable
+    public static <T> T executeBlocking(
+            @NonNull RootCallable<T> callable,
+            @NonNull RootArgs args,
+            long timeout,
+            @NonNull TimeUnit unit
+    ) throws IOException, InterruptedException, TimeoutException {
         try {
-            return submit(callable).get(timeout, unit);
+            return submit(callable, args).get(timeout, unit);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof IOException) throw (IOException) cause;
@@ -219,9 +281,21 @@ public final class RootThread {
      *
      * @throws IOException On any serialization, IPC, or type-mismatch error.
      */
-    @SuppressWarnings("unchecked")
     @Nullable
     static <T> T executeSync(@NonNull RootCallable<T> callable) throws IOException {
+        return executeSync(callable, RootArgs.EMPTY);
+    }
+
+    /**
+     * Core synchronous IPC routine with custom arguments.  Wraps {@code callable} and
+     * {@code args} in a {@link CallableEnvelope}, serializes the envelope into a pipe,
+     * hands the read-end to the root service, then reads and deserializes the result.
+     *
+     * @throws IOException On any serialization, IPC, or type-mismatch error.
+     */
+    @SuppressWarnings("unchecked")
+    @Nullable
+    static <T> T executeSync(@NonNull RootCallable<T> callable, @NonNull RootArgs args) throws IOException {
         IRootThread svc;
         try {
             svc = sRootServiceFuture.get();
@@ -245,7 +319,7 @@ public final class RootThread {
                          new ParcelFileDescriptor.AutoCloseOutputStream(callableWrite);
                  Output output = new Output(fos)) {
                 KryoManager kryo = buildKryo(null);
-                kryo.writeClassAndObject(output, callable);
+                kryo.writeClassAndObject(output, new CallableEnvelope(callable, args));
                 output.flush();
             }
 
@@ -387,7 +461,23 @@ public final class RootThread {
     }
 
     public static final Companion Companion = new Companion();
+
     public static final class Companion {
-        private Companion() {}
+        private Companion() {
+        }
+    }
+
+    /**
+     * Serialization envelope that bundles a {@link RootCallable} with its {@link RootArgs}
+     * so both travel through the same Kryo-serialized pipe in a single pass.
+     */
+    record CallableEnvelope(RootCallable<?> callable, RootArgs args) implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        CallableEnvelope(@NonNull RootCallable<?> callable, @NonNull RootArgs args) {
+            this.callable = callable;
+            this.args = args;
+        }
     }
 }

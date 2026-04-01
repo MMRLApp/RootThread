@@ -91,18 +91,19 @@ public final class RootThreadService extends RootService {
                     RootThread.KryoManager kryo = RootThread.buildKryo(
                             getAppClassResolver(),
                             RootThreadBinder.class.getClassLoader());
-                    RootCallable<?> callable = (RootCallable<?>) kryo.readClassAndObject(input);
+                    RootThread.CallableEnvelope envelope =
+                            (RootThread.CallableEnvelope) kryo.readClassAndObject(input);
 
                     try {
-                        RootOptions options = new RootOptions(mContext);
-                        result = callable.call(options);
+                        RootOptions options = new RootOptions(mContext, envelope.args());
+                        result = envelope.callable().call(options);
                     } catch (Throwable t) {
                         Log.e(TAG, "Root callable threw", t);
                         result = t;
                     }
 
                 } catch (Exception e) {
-                    Log.e(TAG, "Failed to deserialise callable", e);
+                    Log.e(TAG, "Failed to deserialize callable", e);
                     result = new IOException("Deserialisation failed in root process", e);
                 }
 

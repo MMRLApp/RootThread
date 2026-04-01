@@ -3,6 +3,7 @@
 
 package dev.mmrlx.thread.ktx
 
+import dev.mmrlx.thread.RootArgs
 import dev.mmrlx.thread.RootCallable
 import dev.mmrlx.thread.RootConsumer
 import dev.mmrlx.thread.RootThread
@@ -177,6 +178,44 @@ fun <T> rootBlocking(timeout: Long, unit: TimeUnit, block: RootCallable<T>): T? 
  */
 suspend operator fun <T> RootThread.invoke(block: RootCallable<T>): T =
     rootThread(block)
+
+// -------------------------------------------------------------------------------------------------
+// Args-aware overloads
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Suspends the coroutine, executes [block] in the root process with [args] available via
+ * [dev.mmrlx.thread.RootOptions.getArgs], and resumes with the result.
+ *
+ * ```kotlin
+ * val result = rootThread(RootArgs.of("path", "/data/local/tmp/file")) { opts ->
+ *     File(opts.args.get<String>("path")).readText()
+ * }
+ * ```
+ */
+suspend fun <T> rootThread(args: RootArgs, block: RootCallable<T>): T =
+    withContext(Dispatchers.IO) {
+        RootThread.submit(block, args).awaitRoot()
+    }
+
+/**
+ * Executes [block] in the root process with [args] and [this] as the receiver,
+ * blocking the calling thread.  Must NOT be called on the main thread.
+ */
+@Throws(IOException::class, InterruptedException::class)
+fun <T> rootBlocking(args: RootArgs, block: RootCallable<T>): T? =
+    RootThread.executeBlocking(block, args)
+
+/**
+ * Timed variant of [rootBlocking] with custom [args].
+ */
+@Throws(
+    IOException::class,
+    InterruptedException::class,
+    java.util.concurrent.TimeoutException::class
+)
+fun <T> rootBlocking(args: RootArgs, timeout: Long, unit: TimeUnit, block: RootCallable<T>): T? =
+    RootThread.executeBlocking(block, args, timeout, unit)
 
 /**
  * Attaches [RootThread] bind/unbind to this [LifecycleOwner]'s lifecycle.
