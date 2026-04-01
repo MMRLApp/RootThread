@@ -1,5 +1,6 @@
 package dev.mmrlx.thread.ktx
 
+import dev.mmrlx.thread.RootArgs
 import dev.mmrlx.thread.RootCallable
 import kotlinx.coroutines.flow.Flow
 
@@ -22,3 +23,17 @@ fun <T> RootCallable<T>.asFlow(): Flow<T> = rootFlow(this)
  * @return The result of the [RootCallable] execution.
  */
 suspend fun <T> RootCallable<T>.asThread(): T = rootThread(this)
+
+/**
+ * Invokes the [RootCallable] instance as a function.
+ *
+ * This operator function allows for a concise syntax to execute the callable
+ * logic, delegating the execution to the underlying thread mechanism.
+ *
+ * @return The result produced by the [RootCallable].
+ */
+suspend operator fun <T> RootCallable<T>.invoke(args: Map<String, Any>? = null): T {
+    if (args == null) return rootThread(this)
+    val mArgs = RootArgs.of(args)
+    return rootThread(mArgs, this)
+}
